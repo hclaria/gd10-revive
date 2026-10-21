@@ -4,7 +4,9 @@
 Runs inside the builder container (needs e2fsprogs and mtools).
 """
 import argparse
+import glob
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -38,6 +40,28 @@ def fat_edit(img, p1_start, name, edit):
         run("mcopy", "-o", "-i", target, local, f"::{name}", env=env)
 
 
+def add_joypads(storage, src_dir):
+    # Lakka overlays /storage/joypads on its own autoconfig profiles at /tmp/joypads.
+    profiles = [p for p in sorted(glob.glob(os.path.join(src_dir, "*.cfg"))) if os.path.getsize(p)]
+    cmds = ["mkdir /joypads", "mkdir /joypads/udev"]
+    used = set()
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, path in enumerate(profiles):
+            local = os.path.join(tmp, f"{i}.cfg")
+            shutil.copyfile(path, local)
+            # Vendor names differ only by trailing spaces, which RetroArch matches on.
+            base = re.sub(r"[^A-Za-z0-9.-]+", "_", os.path.basename(path)[:-4]).strip("_")
+            name, n = base, 2
+            while name in used:
+                name, n = f"{base}_{n}", n + 1
+            used.add(name)
+            cmds.append(f"write {local} /joypads/udev/{name}.cfg")
+        script = os.path.join(tmp, "cmds")
+        open(script, "w").write("\n".join(cmds) + "\n")
+        run("debugfs", "-w", "-f", script, storage)
+    return len(profiles)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("lakka_img")
@@ -45,6 +69,7 @@ def main():
     p.add_argument("output")
     p.add_argument("--card-bytes", type=int, help="card size; adds a ROMS partition after a fixed STORAGE")
     p.add_argument("--storage-mib", type=int, default=4096)
+    p.add_argument("--joypads", help="directory of RetroArch gamepad profiles (*.cfg) to preinstall")
     a = p.parse_args()
 
     boot = open(a.bootloader, "rb").read()
@@ -65,25 +90,31 @@ def main():
         f"dtb_name={DTB}" if line.startswith("dtb_name=") else line.replace(" quiet ", " ")
         for line in t.splitlines()) + "\n")
 
-    if a.card_bytes:
-        card_sectors = a.card_bytes // SECTOR
-        new_p2 = a.storage_mib * MiB // SECTOR
-        p3_start = p2_start + new_p2
-        assert card_sectors > p3_start + 1024 * MiB // SECTOR, "card too small for a ROMS partition"
+    new_p2 = a.storage_mib * MiB // SECTOR if a.card_bytes else p2_size
+    if a.card_bytes or a.joypads:
         with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(a.output))) as tmp:
             p2 = os.path.join(tmp, "p2.img")
             with open(a.output, "rb") as src, open(p2, "wb") as dst:
                 src.seek(p2_start * SECTOR)
                 dst.write(src.read(p2_size * SECTOR))
-            os.truncate(p2, new_p2 * SECTOR)
-            subprocess.run(["e2fsck", "-fy", p2], capture_output=True)
-            run("resize2fs", p2)
-            # Without this marker Lakka keeps STORAGE at this size instead of growing it over ROMS.
-            run("debugfs", "-w", "-R", "rm /.please_resize_me", p2)
+            if a.card_bytes:
+                os.truncate(p2, new_p2 * SECTOR)
+                subprocess.run(["e2fsck", "-fy", p2], capture_output=True)
+                run("resize2fs", p2)
+                # Without this marker Lakka keeps STORAGE at this size instead of growing it over ROMS.
+                run("debugfs", "-w", "-R", "rm /.please_resize_me", p2)
+            if a.joypads:
+                print(f"preinstalled {add_joypads(p2, a.joypads)} gamepad profiles")
             with open(a.output, "r+b") as dst, open(p2, "rb") as src:
                 dst.seek(p2_start * SECTOR)
                 shutil.copyfileobj(src, dst, 16 * MiB)
-                dst.truncate(p3_start * SECTOR)
+                if a.card_bytes:
+                    dst.truncate((p2_start + new_p2) * SECTOR)
+
+    if a.card_bytes:
+        card_sectors = a.card_bytes // SECTOR
+        p3_start = p2_start + new_p2
+        assert card_sectors > p3_start + 1024 * MiB // SECTOR, "card too small for a ROMS partition"
         with open(a.output, "r+b") as f:
             mbr = bytearray(f.read(SECTOR))
             struct.pack_into("<I", mbr, 446 + 16 + 12, new_p2)

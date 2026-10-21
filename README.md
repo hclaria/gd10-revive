@@ -46,9 +46,23 @@ The full story, the SD card layout and the digest format BL2 checks are in [docs
    ```sh
    ./make-image.sh --dump stock-1MiB.bin --card-bytes 31299993600
    ```
+   Add `--joypads-from stock-storage.img` to carry over the stock gamepad profiles (see below).
    No stock card, or a damaged BL2? Use the prebuilt bootloader from the [Releases](../../releases) page instead of `--dump`: `--bootloader gd10-s905-bootloader.bin`. It was taken from one GD10 and its RAM settings may not suit every board.
 4. **Flash** `build/gd10-lakka.img` and format the ROMS partition. The script prints the exact commands.
 5. **Boot.** You should see U-Boot, then Linux boot messages. The first boot creates the file systems and reboots once, then RetroArch starts.
+
+## Gamepad profiles from the stock card
+
+The vendor's EmuELEC setup ships RetroArch profiles for the bundled 2.4 GHz pads (DragonRise `0079:0006`, "Twin USB Gamepad" / "USB Gamepad" `0810:0001`, ShanWan "Twin USB Joystick" `20bc:5500`). Lakka reads the same format, so you can carry them over and get correct buttons on first boot.
+
+1. Dump the stock card's second partition (Linux, about 2 GB):
+   ```sh
+   sudo dd if=/dev/rdiskNs2 of=stock-storage.img bs=4m status=progress   # macOS
+   sudo dd if=/dev/sdX2 of=stock-storage.img bs=4M status=progress       # Linux
+   ```
+2. Add `--joypads-from stock-storage.img` to `make-image.sh`. You can also pass a folder of `.cfg` files instead.
+
+The profiles land in `/storage/joypads/udev`, which Lakka merges with its own profiles. To do it by hand on a running Lakka, copy the `.cfg` files from the stock card's `/joypads` folder into `/storage/joypads` over SSH or Samba.
 
 ## ROMs and BIOS
 
@@ -56,7 +70,7 @@ Put your games on the `ROMS` partition, one folder per system, and BIOS files in
 
 ## Known issues
 
-- **Gamepads**: generic 2.4 GHz pads work but may have scrambled buttons. Fix it once with *Settings > Input > Port 1 Controls > Set All Controls*, then *Save Controller Profile*.
+- **Gamepads**: without the stock profiles, generic 2.4 GHz pads work but may have scrambled buttons. Fix it once with *Settings > Input > Port 1 Controls > Set All Controls*, then *Save Controller Profile*.
 - **Wi-Fi**: the Realtek SDIO chip is probably not supported by the mainline kernel. Use a USB hub with an Ethernet adapter or copy files through the ROMS partition.
 - **Performance**: the Mali-450 runs on the open source Lima driver. 8/16-bit systems, arcade and PS1 are fine. PSP and Dreamcast are too heavy.
 - **EmuELEC and other Amlogic 3.14 kernels do not boot** with mainline U-Boot (the kernel hangs before starting its initramfs). See [docs/boot-chain.md](docs/boot-chain.md) if you want to dig further with a serial console.
