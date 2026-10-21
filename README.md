@@ -62,11 +62,11 @@ The vendor's EmuELEC setup ships RetroArch profiles for the bundled 2.4 GHz pads
    ```
 2. Add `--joypads-from stock-storage.img` to `make-image.sh`. You can also pass a folder of `.cfg` files instead.
 
-The profiles land in `/storage/joypads/udev`, which Lakka merges with its own profiles. To do it by hand on a running Lakka, copy the `.cfg` files from the stock card's `/joypads` folder into `/storage/joypads` over SSH or Samba.
+The profiles are stored in `gd10/joypads` on the first partition and copied to `/storage/joypads/udev` by Lakka's first-boot script. Lakka merges that folder with its own profiles. To do it by hand on a running Lakka, copy the `.cfg` files from the stock card's `/joypads` folder into `/storage/joypads` over SSH or Samba.
 
 ## ROMs and BIOS
 
-Put your games on the `ROMS` partition, one folder per system, and BIOS files in `ROMS/bios` (RetroArch is preconfigured to look there). In RetroArch: **Import Content > Scan Directory > /var/media/ROMS**.
+Put your games on the `ROMS` partition, one folder per system, and BIOS files in `ROMS/bios` (RetroArch is preconfigured to look there). In RetroArch: **Import Content > Scan Directory > /storage/roms/ROMS**.
 
 ## Known issues
 
