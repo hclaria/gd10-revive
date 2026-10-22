@@ -80,7 +80,7 @@ It writes `ROMS/playlists` (where the image points RetroArch) with the right sys
 
 On mainline Linux the S905's thermal zone has no working cooling device, and the firmware advertises CPU speeds up to 2 GHz. Left alone, the stick reaches the 110 C critical trip in 5 to 15 minutes and powers itself off. The image installs `gd10-thermal`, a small service that caps the CPU (1.3 GHz, then 1 GHz above 80 C, 500 MHz above 90 C) and the GPU (500, 285 then 125 MHz). It also sets RetroArch's CPU governing mode to *Balanced* instead of *Performance (Managed)*.
 
-A small stick-on heatsink or some airflow around the stick still helps a lot.
+A small stick-on heatsink or some airflow around the stick still helps a lot. To watch it, create a `gd10-debug` folder on the ROMS partition: the service then writes temperature and clock speeds to `gd10-debug/thermal.log` every 2 seconds.
 
 ## Input lag
 
