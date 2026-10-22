@@ -1,0 +1,11 @@
+[Unit]
+Description=GD10 software thermal throttle
+After=local-fs.target
+
+[Service]
+ExecStart=/bin/sh /flash/gd10/gd10-thermal.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

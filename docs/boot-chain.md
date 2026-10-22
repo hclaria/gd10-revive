@@ -49,6 +49,20 @@ After that rotation the payload lands at its load address unchanged (U-Boot at 0
    - With both fixes HDMI goes dark when the kernel starts, but `/init` never runs: a hook in the initramfs that logs to every partition and forces a reboot never fired. The 3.14 kernel probably depends on state only the vendor U-Boot sets up. A serial console is the next step.
 5. **Lakka 6.1 AMLGX (mainline Linux)** with `meson-gxbb-p200.dtb`: boots, HDMI, USB gamepads.
 
+## Thermal shutdowns on mainline
+
+Symptom: after 5 to 15 minutes the TV says "no cable", the green LED stays on, and only a power cycle brings the stick back. The journal shows `cpu-thermal: critical temperature reached` then `HARDWARE PROTECTION shutdown (Temperature too high)`: an orderly power off at the 110 C trip.
+
+What a logger sampling sysfs every 2 s showed:
+
+- `scpi-cpufreq` (legacy pre-1.0 SCP firmware) offers 100 MHz to **2016 MHz**, and `ondemand` happily runs at 2016 MHz. With no cap: 45 C to 110 C in 4.5 minutes.
+- The `cpu-thermal` zone has passive (80 C), hot (90 C) and critical (110 C) trips, and its cooling maps point at the four CPUs, but no cpufreq cooling device is registered, so nothing is bound to the zone and it never throttles.
+- The only cooling device is `devfreq-d00c0000.gpu` (Lima), not referenced by any map, so the Mali-450 stays at 744 MHz.
+- Capping the CPU alone is not enough: with the CPU at 500 MHz for most of a 16-minute session, the SoC still reached 105 C.
+- RetroArch's default *Performance (Managed)* CPU mode rewrites `scaling_max_freq`, so a one-time cap does not hold.
+
+`lakka/gd10-thermal.sh` reapplies CPU and GPU caps every 2 s based on the zone temperature. A cleaner fix would be a device tree overlay adding the GPU to the cooling maps, plus a cpufreq cooling device for `scpi-cpufreq`.
+
 ## Serial console
 
 A 3.3 V USB to TTL adapter (CP2102, CH340 or FT232) on the board's TX/RX/GND pads at 115200 8N1 shows BL2, U-Boot and kernel logs. Never connect VCC.

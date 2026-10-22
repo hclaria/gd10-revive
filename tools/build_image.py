@@ -15,7 +15,12 @@ import tempfile
 SECTOR = 512
 MiB = 1024 * 1024
 DTB = "/amlogic/meson-gxbb-p200.dtb"
-ROMS_OVERRIDES = 'system_directory = "/storage/roms/ROMS/bios"\nrgui_browser_directory = "/storage/roms/ROMS"\n'
+LAKKA_FILES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lakka")
+# cpu_scaling_mode 4 is "Balanced": the default "Performance (Managed)" pins the CPU at max.
+OVERRIDES = 'cpu_scaling_mode = "4"\n'
+ROMS_OVERRIDES = ('system_directory = "/storage/roms/ROMS/bios"\n'
+                  'rgui_browser_directory = "/storage/roms/ROMS"\n'
+                  'playlist_directory = "/storage/roms/ROMS/playlists"\n')
 
 
 def run(*cmd, **kw):
@@ -41,7 +46,12 @@ def fat_edit(img, p1_start, name, edit):
 
 
 FIRSTBOOT_MARK = "# v v v v v v v v v v v v v v v v v v v v\n"
-JOYPADS_HOOK = """
+# STORAGE is recreated on first boot, so our files ride on the FAT partition (/flash)
+# and firstboot.sh installs them. Lakka loads units from /storage/.config/system.d.
+FIRSTBOOT_HOOK = """
+mkdir -p /storage/.config/system.d/multi-user.target.wants
+cp /flash/gd10/gd10-thermal.service /storage/.config/system.d/
+ln -sf ../gd10-thermal.service /storage/.config/system.d/multi-user.target.wants/gd10-thermal.service
 if [ -d /flash/gd10/joypads ]; then
   mkdir -p /storage/joypads/udev
   cp /flash/gd10/joypads/*.cfg /storage/joypads/udev/
@@ -49,26 +59,31 @@ fi
 """
 
 
-def add_joypads(img, p1_start, src_dir):
-    # STORAGE is recreated on first boot, so the profiles ride on the FAT partition and
-    # firstboot.sh copies them into /storage/joypads, which Lakka overlays on its own set.
-    profiles = [p for p in sorted(glob.glob(os.path.join(src_dir, "*.cfg"))) if os.path.getsize(p)]
+def install_gd10_files(img, p1_start, joypads_dir):
     target = f"{img}@@{p1_start * SECTOR}"
     env = dict(os.environ, MTOOLS_SKIP_CHECK="1")
-    run("mmd", "-i", target, "::gd10", "::gd10/joypads", env=env)
-    used = set()
-    with tempfile.TemporaryDirectory() as tmp:
-        for path in profiles:
-            # Vendor names differ only by trailing spaces, which RetroArch matches on.
-            base = re.sub(r"[^A-Za-z0-9.-]+", "_", os.path.basename(path)[:-4]).strip("_")
-            name, n = base, 2
-            while name in used:
-                name, n = f"{base}_{n}", n + 1
-            used.add(name)
-            local = os.path.join(tmp, f"{name}.cfg")
-            shutil.copyfile(path, local)
-            run("mcopy", "-i", target, local, f"::gd10/joypads/{name}.cfg", env=env)
-    fat_edit(img, p1_start, "firstboot.sh", lambda t: t.replace(FIRSTBOOT_MARK, FIRSTBOOT_MARK + JOYPADS_HOOK, 1))
+    run("mmd", "-i", target, "::gd10", env=env)
+    for name in ("gd10-thermal.sh", "gd10-thermal.service"):
+        run("mcopy", "-i", target, os.path.join(LAKKA_FILES, name), f"::gd10/{name}", env=env)
+
+    profiles = []
+    if joypads_dir:
+        profiles = [p for p in sorted(glob.glob(os.path.join(joypads_dir, "*.cfg"))) if os.path.getsize(p)]
+        run("mmd", "-i", target, "::gd10/joypads", env=env)
+        used = set()
+        with tempfile.TemporaryDirectory() as tmp:
+            for path in profiles:
+                # Vendor names differ only by trailing spaces, which RetroArch matches on.
+                base = re.sub(r"[^A-Za-z0-9.-]+", "_", os.path.basename(path)[:-4]).strip("_")
+                name, n = base, 2
+                while name in used:
+                    name, n = f"{base}_{n}", n + 1
+                used.add(name)
+                local = os.path.join(tmp, f"{name}.cfg")
+                shutil.copyfile(path, local)
+                run("mcopy", "-i", target, local, f"::gd10/joypads/{name}.cfg", env=env)
+
+    fat_edit(img, p1_start, "firstboot.sh", lambda t: t.replace(FIRSTBOOT_MARK, FIRSTBOOT_MARK + FIRSTBOOT_HOOK, 1))
     return len(profiles)
 
 
@@ -100,8 +115,9 @@ def main():
         f"dtb_name={DTB}" if line.startswith("dtb_name=") else line.replace(" quiet ", " ")
         for line in t.splitlines()) + "\n")
 
-    if a.joypads:
-        print(f"bundled {add_joypads(a.output, p1_start, a.joypads)} gamepad profiles")
+    print(f"installed thermal throttle, {install_gd10_files(a.output, p1_start, a.joypads)} gamepad profiles")
+    overrides = OVERRIDES + (ROMS_OVERRIDES if a.card_bytes else "")
+    fat_edit(a.output, p1_start, "retroarch-overrides.txt", lambda t: t.rstrip("\n") + "\n\n" + overrides)
 
     if a.card_bytes:
         # Lakka's first boot runs "parted resizepart 2 100%", which fails harmlessly with a
@@ -120,7 +136,6 @@ def main():
             mbr[446 + 32:446 + 48] = p3
             f.seek(0)
             f.write(mbr)
-        fat_edit(a.output, p1_start, "retroarch-overrides.txt", lambda t: t.rstrip("\n") + "\n\n" + ROMS_OVERRIDES)
         print(f"STORAGE {a.storage_mib} MiB, ROMS partition {(card_sectors - p3_start) * SECTOR / 1e9:.1f} GB (format it after flashing)")
 
     print(f"wrote {a.output} ({os.path.getsize(a.output) / 1e9:.2f} GB)")
