@@ -3,6 +3,7 @@
 #
 # usage: ./make-image.sh (--dump stock-card-1MiB.bin | --bootloader bootloader.bin)
 #                        [--card-bytes N] [--joypads-from stock-storage.img | DIR]
+# Gamepad profiles in lakka/joypads are always installed; --joypads-from adds more.
 set -eu
 cd "$(dirname "$0")"
 

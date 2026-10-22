@@ -66,22 +66,28 @@ def install_gd10_files(img, p1_start, joypads_dir):
     for name in ("gd10-thermal.sh", "gd10-thermal.service"):
         run("mcopy", "-i", target, os.path.join(LAKKA_FILES, name), f"::gd10/{name}", env=env)
 
-    profiles = []
+    # Profiles for the pads sold with GD10 sticks ship with the repo, so a stick without
+    # its stock card still gets the right buttons. Profiles from a stock card win on a clash.
+    profiles = {os.path.basename(p): p for p in glob.glob(os.path.join(LAKKA_FILES, "joypads", "*.cfg"))}
     if joypads_dir:
-        profiles = [p for p in sorted(glob.glob(os.path.join(joypads_dir, "*.cfg"))) if os.path.getsize(p)]
-        run("mmd", "-i", target, "::gd10/joypads", env=env)
         used = set()
-        with tempfile.TemporaryDirectory() as tmp:
-            for path in profiles:
-                # Vendor names differ only by trailing spaces, which RetroArch matches on.
-                base = re.sub(r"[^A-Za-z0-9.-]+", "_", os.path.basename(path)[:-4]).strip("_")
-                name, n = base, 2
-                while name in used:
-                    name, n = f"{base}_{n}", n + 1
-                used.add(name)
-                local = os.path.join(tmp, f"{name}.cfg")
-                shutil.copyfile(path, local)
-                run("mcopy", "-i", target, local, f"::gd10/joypads/{name}.cfg", env=env)
+        for path in sorted(glob.glob(os.path.join(joypads_dir, "*.cfg"))):
+            if not os.path.getsize(path):
+                continue
+            # Vendor names differ only by trailing spaces, which RetroArch matches on.
+            base = re.sub(r"[^A-Za-z0-9.-]+", "_", os.path.basename(path)[:-4]).strip("_")
+            name, n = base, 2
+            while name in used:
+                name, n = f"{base}_{n}", n + 1
+            used.add(name)
+            profiles[f"{name}.cfg"] = path
+
+    run("mmd", "-i", target, "::gd10/joypads", env=env)
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, path in sorted(profiles.items()):
+            local = os.path.join(tmp, name)
+            shutil.copyfile(path, local)
+            run("mcopy", "-i", target, local, f"::gd10/joypads/{name}", env=env)
 
     fat_edit(img, p1_start, "firstboot.sh", lambda t: t.replace(FIRSTBOOT_MARK, FIRSTBOOT_MARK + FIRSTBOOT_HOOK, 1))
     return len(profiles)
